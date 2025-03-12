@@ -19,14 +19,25 @@
 #include <ESPAsyncWebServer.h>
 #include <EEPROM.h>
 #include <WiFiUdp.h>
+#include <regex>
 
 AsyncWebServer server(80);
-const int ssidIndex=1;
+const int ssidIndex=3;
 const int idespIndex=0;
-const int passwordIndex=35;
+const int passwordIndex=36;
+const int mqtthostIndex=68;
+const int mqttuserIndex=100;
+const int mqttpwdIndex=132;
+const int mqtthostportIndex=164;
+
 String idesp = "";
 String ssidWifi = "";
 String passwordWifi = "";
+String mqtthost = "";
+String mqtthostport = "";
+String mqttuser ="";
+String mqttpwd = "";
+
 const IPAddress mqtt_server(192, 168, 0, 14);
 const char* mqttUser     = "bruno";
 const char* mqttPassword = "bruno";
@@ -93,27 +104,53 @@ const char index_html[] PROGMEM = R"rawliteral(
       }
     </style>
   </head>
-  <body>
+  <body onload="getdata()">
     <div class="wifi-form">
-      <h1>Test</h1>
+      <h1>Configuration Module de Puissance</h1>
       <label for="idesp">ID EQUIPEMENT</label>
       <input id="idesp" class="input" type="number" maxlength="1">
       <label for="ssid">WIFI ID (SSID)</label>
       <input id="ssid" class="input" type="text" maxlength="32">
       <label for="password">WIFI PASSWORD</label>
       <input id="password" class="input" type="password">
-      <button onclick="connectToWifi()">Connect</button>
-      <label id="sentLabel">Informations de connection configurés</label>
+      <label for="mqtthost">MQTT HOST IP</label>
+      <input id="mqtthost" class="input" type="text">
+      <label for="mqtthostport">MQTT HOST PORT</label>
+      <input id="mqtthostport" class="input" type="text" value="1883">
+      <label for="mqttuser">MQTT USER</label>
+      <input id="mqttuser" class="input" type="text">
+      <label for="mqttpwd">MQTT PASSWORD</label>
+      <input id="mqttpwd" class="input" type="password">
+      <button onclick="connectToWifi()">Save configuration</button>
+      <label id="sentLabel">Informations de configuration sauvegardée</label>
     </div>
   </body>
   <script>
+    function getdata() {
+      fetch('/getdata')
+      .then(response => response.text())
+      .then(data => { let array = data.split("%");
+              document.getElementById('idesp').value = array[0] || "";
+              document.getElementById('ssid').value = array[1] || "";
+              document.getElementById('password').value = array[2] || "";
+              document.getElementById('mqtthost').value = array[3] || "";
+              document.getElementById('mqtthostport').value = array[4] || "";
+              document.getElementById('mqttuser').value = array[5] || "";
+              document.getElementById('mqttpwd').value = array[6] || "";
+              });
+    }
+
     function connectToWifi() {
       var idesp = document.getElementById("idesp").value;
       var ssid = document.getElementById("ssid").value;
       var password = document.getElementById("password").value;
+      var mqtthost = document.getElementById("mqtthost").value;
+      var mqtthostport = document.getElementById("mqtthostport").value;
+      var mqttuser = document.getElementById("mqttuser").value;
+      var mqttpwd = document.getElementById("mqttpwd").value;
       var xhr = new XMLHttpRequest(); xhr.open("POST", "/", true);
       xhr.setRequestHeader('Content-Type', 'application/json');
-      xhr.send(idesp + ":" + ssid + ":" + password);
+      xhr.send(idesp + "%" + ssid + "%" + password + "%" + mqtthost + "%" + mqtthostport + "%" + mqttuser + "%" + mqttpwd);
       document.getElementById("sentLabel").style.display = "inline";
     }
   </script>
@@ -150,36 +187,45 @@ void createAccessPoint() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", index_html);
   });
+  server.on("/getdata", HTTP_GET, [](AsyncWebServerRequest *request) {
+    String separator ="%";
+    String data = idesp + separator +ssidWifi+separator+passwordWifi+separator+ mqtthost + separator+ mqtthostport + separator+ mqttuser + separator + mqttpwd+separator;
+    request->send_P(200, "text/plain", data.c_str());
+  });
+
   server.on("/", HTTP_POST, [](AsyncWebServerRequest *request){},NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-    idesp="";
+    idesp = "";
     ssidWifi = "";
     passwordWifi = "";
+    mqtthost ="";
+    mqtthostport = "";
+    mqttuser ="";
+    mqttpwd = "";
 
     String res((char *)data);
-    int firstSepIndex = -1;
-    int secondSepIndex = -1;
-
-    for (int i = 0; i < len; ++i) {
-      if (res[i] != ':') {
-        if (firstSepIndex == -1) {
-          idesp.concat(res[i]);
-        } else if (secondSepIndex == -1) {
-          ssidWifi.concat(res[i]);
-        } else {
-          passwordWifi.concat(res[i]);
-        }
-      } else {
-        if (firstSepIndex == -1) {
-          firstSepIndex = i;
-        } else if (secondSepIndex == -1) {
-          secondSepIndex = i;
-        }
-      }
-    }
-
+    int index1 = res.indexOf('%');
+    int index2 = res.indexOf('%', index1 + 1);
+    int index3 = res.indexOf('%', index2 + 1);
+    int index4 = res.indexOf('%', index3 + 1);
+    int index5 = res.indexOf('%', index4 + 1);
+    int index6 = res.indexOf('%', index5 + 1);
+    
+    idesp = res.substring(0, index1);
+    ssidWifi = res.substring(index1 +1,index2);
+    passwordWifi = res.substring(index2 +1, index3);
+    mqtthost = res.substring(index3 +1 , index4);
+    mqtthostport = res.substring(index4 +1 , index5);
+    mqttuser = res.substring(index5+1, index6);
+    mqttpwd = res.substring(index6+1);
+    
     writeEEPROM(idesp, idespIndex);
     writeEEPROM(ssidWifi, ssidIndex);
     writeEEPROM(passwordWifi, passwordIndex);
+    writeEEPROM(mqtthost, mqtthostIndex);
+    writeEEPROM(mqtthostport, mqtthostportIndex);
+    writeEEPROM(mqttuser, mqttuserIndex);
+    writeEEPROM(mqttpwd, mqttpwdIndex);
+    
     request->send(200, "text/plain", "SUCCESS");
   });
   server.begin();
@@ -196,23 +242,30 @@ void debug(String message) {
 }
 unsigned long previousBlinkMillis = 0;
 unsigned long previousCheckMillis = 0;
-const long checkInterval = 60000; // Vérifier le Wi-Fi toutes les 60 secondes
+const long checkInterval = 120000; // Vérifier le Wi-Fi toutes les 2 minutes (l access point restera accessible 2 min en cas de pb de connexion, avt de retenter la connexion)
 bool ledState = LOW;
 bool isAPMode = false;
 bool wifiLost = false; // Indique si le Wi-Fi a été perdu
 
+void readParameters() {
+      ssidWifi = readEEPROM(ssidIndex);
+      passwordWifi = readEEPROM(passwordIndex);
+      idesp = readEEPROM(idespIndex);
+      mqtthost = readEEPROM(mqtthostIndex);
+      mqtthostport= readEEPROM(mqtthostportIndex);
+      mqttuser =  readEEPROM(mqttuserIndex);
+      mqttpwd = readEEPROM(mqttpwdIndex);
+}
 
 void setup_wifi() {
-  ssidWifi = readEEPROM(ssidIndex);
-  passwordWifi = readEEPROM(passwordIndex);
-  
-   
-  Serial.println("Tentative de connexion au Wi-Fi...");
-  digitalWrite(LED_BUILTIN, LOW); // Allumer la LED pendant la connexion
-  
   if (ssidWifi.length() > 0 && passwordWifi.length() > 0 && WiFi.status() != WL_CONNECTED) {
-    WiFi.softAPdisconnect(true);
-    server.end();
+    Serial.println("Tentative de connexion au Wi-Fi...");
+    digitalWrite(LED_BUILTIN, LOW); // Allumer la LED pendant la connexion
+    if (isAPMode) {
+       WiFi.softAPdisconnect(true);
+       server.end();
+       isAPMode = false;
+    }
     WiFi.begin(ssidWifi, passwordWifi);
 
     int attempts = 0;
@@ -233,13 +286,15 @@ void setup_wifi() {
     } 
     else {
       Serial.println("\nÉchec de connexion, passage en mode point d'accès...");
+      wifiLost=true;
+      isAPMode = true;
       createAccessPoint();
-      isAPMode=true;
     }
   } else {
     Serial.println("Aucune information Wi-Fi trouvée, passage en mode point d'accès...");
+    wifiLost=true;
+    isAPMode = true;
     createAccessPoint();
-    isAPMode=true;
   }
 }
 
@@ -275,23 +330,27 @@ void IRAM_ATTR onZero() {
 
 void setup() {
     Serial.begin(115200);
-    EEPROM.begin(128);
+    EEPROM.begin(256);
  
     // usual pin configuration
     pinMode(PIN_SCR, OUTPUT);
     pinMode(LED_BUILTIN,OUTPUT);
     digitalWrite(PIN_SCR, LOW);
     pinMode(PIN_ZERO, INPUT);
-    
+
+    readParameters();    
     setup_wifi();
     // setup the MQTT stuff (one topic for commands, another one to broadcast the current power)
     outTopic = "scr/" + String(idesp) +"/out";
     inTopic = "scr/" + String(idesp) +"/in";
     debugTopic = "scr/debug/" + String(idesp);
+    Serial.println("in topic: " + inTopic);
+    Serial.println("out topic: " + outTopic);
 
     client.setServer(mqtt_server, 1883);
     client.setCallback(on_message);
     reconnect();
+    Serial.println("client Connected: " + String(client.connected()));
 
     // setup the timer used to manage SCR tops
     // listen for change on the pin ZERO
@@ -299,7 +358,7 @@ void setup() {
     
 }
 
-void blinkLED(int interval) {
+void blinkLED(long unsigned interval) {
   unsigned long currentMillis = millis();
   if (currentMillis - previousBlinkMillis >= interval) {
     previousBlinkMillis = currentMillis;
@@ -316,6 +375,7 @@ void checkWifi() {
       Serial.println("Wi-Fi perdu, tentative de reconnexion...");
       wifiLost = true;
       WiFi.disconnect();
+      readParameters();
       setup_wifi();
     }
   } else {
@@ -323,7 +383,6 @@ void checkWifi() {
       Serial.println("Wi-Fi reconnecté !");
       Serial.println(WiFi.localIP());
       wifiLost = false;
-      isAPMode = false;
     }
   }
 }
