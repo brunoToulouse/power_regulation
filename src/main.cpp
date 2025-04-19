@@ -22,13 +22,14 @@
 #include <regex>
 
 AsyncWebServer server(80);
-const int ssidIndex=3;
+#define EEPROM_SIZE 512
 const int idespIndex=0;
+const int ssidIndex=3;
 const int passwordIndex=36;
 const int mqtthostIndex=68;
-const int mqttuserIndex=100;
-const int mqttpwdIndex=132;
-const int mqtthostportIndex=164;
+const int mqttuserIndex=90;
+const int mqttpwdIndex=122;
+const int mqtthostportIndex=154;
 
 String idesp = "";
 String ssidWifi = "";
@@ -39,8 +40,7 @@ String mqttuser ="";
 String mqttpwd = "";
 
 const IPAddress mqtt_server(192, 168, 0, 14);
-const char* mqttUser     = "bruno";
-const char* mqttPassword = "bruno";
+u_int16_t mqtt_port;
 byte scrState = 0;
 
 //const char* mqtt_server = "192.168.0.14";
@@ -149,34 +149,34 @@ const char index_html[] PROGMEM = R"rawliteral(
       var mqttuser = document.getElementById("mqttuser").value;
       var mqttpwd = document.getElementById("mqttpwd").value;
       var xhr = new XMLHttpRequest(); xhr.open("POST", "/", true);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      xhr.send(idesp + "%" + ssid + "%" + password + "%" + mqtthost + "%" + mqtthostport + "%" + mqttuser + "%" + mqttpwd);
+      xhr.setRequestHeader('Content-Type', 'text/plain');
+      xhr.send(idesp + "%" + ssid + "%" + password + "%" + mqtthost + "%" + mqtthostport + "%" + mqttuser + "%" + mqttpwd + "%");
       document.getElementById("sentLabel").style.display = "inline";
     }
   </script>
 </html>)rawliteral";
 
-
-
-void writeEEPROM(String value, int address) {
-  int len = value.length();
-  EEPROM.put(address, len);
-  for (int i = address + 1; i < len + address + 1; ++i) {
-    EEPROM.put(i, value[i - address - 1]);
+void writeStringToEEPROM(String str, int addr ) {
+  EEPROM.begin(EEPROM_SIZE);
+  for (int i = 0; i < str.length(); ++i) {
+    EEPROM.write(addr + i, str[i]);
   }
+  EEPROM.write(addr + str.length(), '\0'); // Fin de chaîne
   EEPROM.commit();
+  EEPROM.end();
 }
 
-String readEEPROM(int address) {
-  uint8_t len = EEPROM.read(address);
-  if (len == 255) return "";
-  String res;
-  for (int i = address + 1; i < len + address + 1; ++i) {
-    char c = (char)EEPROM.read(i);
-    res.concat(c);
+String readStringFromEEPROM(int addr) {
+  EEPROM.begin(EEPROM_SIZE);
+  String result = "";
+  char ch;
+  while ((ch = EEPROM.read(addr++)) != '\0' && addr < EEPROM_SIZE) {
+    result += ch;
   }
-  return res;
+  EEPROM.end();
+  return result;
 }
+
 void createAccessPoint() {
   WiFi.softAP(ssid, password);
   IPAddress IP = WiFi.softAPIP();
@@ -209,6 +209,7 @@ void createAccessPoint() {
     int index4 = res.indexOf('%', index3 + 1);
     int index5 = res.indexOf('%', index4 + 1);
     int index6 = res.indexOf('%', index5 + 1);
+    int index7 = res.indexOf('%', index6 + 1);
     
     idesp = res.substring(0, index1);
     ssidWifi = res.substring(index1 +1,index2);
@@ -216,15 +217,15 @@ void createAccessPoint() {
     mqtthost = res.substring(index3 +1 , index4);
     mqtthostport = res.substring(index4 +1 , index5);
     mqttuser = res.substring(index5+1, index6);
-    mqttpwd = res.substring(index6+1);
+    mqttpwd = res.substring(index6+1,index7);
     
-    writeEEPROM(idesp, idespIndex);
-    writeEEPROM(ssidWifi, ssidIndex);
-    writeEEPROM(passwordWifi, passwordIndex);
-    writeEEPROM(mqtthost, mqtthostIndex);
-    writeEEPROM(mqtthostport, mqtthostportIndex);
-    writeEEPROM(mqttuser, mqttuserIndex);
-    writeEEPROM(mqttpwd, mqttpwdIndex);
+    writeStringToEEPROM(idesp, idespIndex);
+    writeStringToEEPROM(ssidWifi, ssidIndex);
+    writeStringToEEPROM(passwordWifi, passwordIndex);
+    writeStringToEEPROM(mqtthost, mqtthostIndex);
+    writeStringToEEPROM(mqtthostport, mqtthostportIndex);
+    writeStringToEEPROM(mqttuser, mqttuserIndex);
+    writeStringToEEPROM(mqttpwd, mqttpwdIndex);
     
     request->send(200, "text/plain", "SUCCESS");
   });
@@ -248,31 +249,33 @@ bool isAPMode = false;
 bool wifiLost = false; // Indique si le Wi-Fi a été perdu
 
 void readParameters() {
-      ssidWifi = readEEPROM(ssidIndex);
-      passwordWifi = readEEPROM(passwordIndex);
-      idesp = readEEPROM(idespIndex);
-      mqtthost = readEEPROM(mqtthostIndex);
-      mqtthostport= readEEPROM(mqtthostportIndex);
-      mqttuser =  readEEPROM(mqttuserIndex);
-      mqttpwd = readEEPROM(mqttpwdIndex);
+      ssidWifi = readStringFromEEPROM(ssidIndex);
+      passwordWifi = readStringFromEEPROM(passwordIndex);
+      idesp = readStringFromEEPROM(idespIndex);
+      mqtthost = readStringFromEEPROM(mqtthostIndex);
+      mqtthostport= readStringFromEEPROM(mqtthostportIndex);
+      mqttuser =  readStringFromEEPROM(mqttuserIndex);
+      mqttpwd = readStringFromEEPROM(mqttpwdIndex);
 }
 
 void setup_wifi() {
+  if (isAPMode) {
+    WiFi.softAPdisconnect(true);
+    server.end();
+    isAPMode = false;
+  }
+
   if (ssidWifi.length() > 0 && passwordWifi.length() > 0 && WiFi.status() != WL_CONNECTED) {
     Serial.println("Tentative de connexion au Wi-Fi...");
-    digitalWrite(LED_BUILTIN, LOW); // Allumer la LED pendant la connexion
-    if (isAPMode) {
-       WiFi.softAPdisconnect(true);
-       server.end();
-       isAPMode = false;
-    }
+    //digitalWrite(LED_BUILTIN, LOW); // Allumer la LED pendant la connexion
+
     WiFi.begin(ssidWifi, passwordWifi);
 
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-      digitalWrite(LED_BUILTIN, LOW); // Éteint
+      digitalWrite(BLUE_LED, LOW); // Éteint
       delay(100);
-      digitalWrite(LED_BUILTIN, HIGH); // Allume
+      digitalWrite(BLUE_LED, HIGH); // Allume
       delay(600);
       Serial.print(".");
       attempts++;
@@ -286,15 +289,15 @@ void setup_wifi() {
     } 
     else {
       Serial.println("\nÉchec de connexion, passage en mode point d'accès...");
+      createAccessPoint();
       wifiLost=true;
       isAPMode = true;
-      createAccessPoint();
     }
   } else {
     Serial.println("Aucune information Wi-Fi trouvée, passage en mode point d'accès...");
+    createAccessPoint();
     wifiLost=true;
     isAPMode = true;
-    createAccessPoint();
   }
 }
 
@@ -310,33 +313,32 @@ void on_message(char* topic, byte* payload, unsigned int length) {
     }
 }
 
-void reconnect() {
+void reconnectMqtt() {
     if (!client.connected()) {
 
         String clientId = "scr-";
         clientId += String(idesp);
-        if (client.connect(clientId.c_str(),mqttUser,mqttPassword)) {
+        if (client.connect(clientId.c_str(),mqttuser.c_str(),mqttpwd.c_str())) {
             client.subscribe(inTopic.c_str());
             sendCurrentPower();
-        } else {
-            delay(5000);
-        }
+        } 
     }
 }
+
 // pin ZERO interrupt routine
 void IRAM_ATTR onZero() {
     changeTime = micros();
 }
 
 void setup() {
-    Serial.begin(115200);
-    EEPROM.begin(256);
  
+    Serial.begin(115200);
     // usual pin configuration
     pinMode(PIN_SCR, OUTPUT);
-    pinMode(LED_BUILTIN,OUTPUT);
-    digitalWrite(PIN_SCR, LOW);
+    pinMode(BLUE_LED,OUTPUT);
     pinMode(PIN_ZERO, INPUT);
+
+    digitalWrite(PIN_SCR, LOW);
 
     readParameters();    
     setup_wifi();
@@ -347,9 +349,9 @@ void setup() {
     Serial.println("in topic: " + inTopic);
     Serial.println("out topic: " + outTopic);
 
-    client.setServer(mqtt_server, 1883);
+    client.setServer(mqtt_server, std::strtoul(mqtthostport.c_str(),nullptr,0));
     client.setCallback(on_message);
-    reconnect();
+    reconnectMqtt();
     Serial.println("client Connected: " + String(client.connected()));
 
     // setup the timer used to manage SCR tops
@@ -363,7 +365,7 @@ void blinkLED(long unsigned interval) {
   if (currentMillis - previousBlinkMillis >= interval) {
     previousBlinkMillis = currentMillis;
     ledState = !ledState;  
-    digitalWrite(LED_BUILTIN, ledState);
+    digitalWrite(BLUE_LED, ledState);
   }
 }
 
@@ -383,6 +385,7 @@ void checkWifi() {
       Serial.println("Wi-Fi reconnecté !");
       Serial.println(WiFi.localIP());
       wifiLost = false;
+      isAPMode = false;
     }
   }
 }
@@ -390,28 +393,27 @@ void checkWifi() {
 void loop() {
   unsigned long currentMillis = millis();
 
-  // Vérifier le Wi-Fi en tâche de fond
+  // Vérifier le Wi-Fi en tâche de fond a interval réguliers
   if (currentMillis - previousCheckMillis >= checkInterval) {
     previousCheckMillis = currentMillis;
     checkWifi();
+    reconnectMqtt();
   }
 
   // Gestion du clignotement sans perturber le temps réel
   if (isAPMode) {
     blinkLED(100);
   }
-  else if (!wifiLost) {
+  // Si wifi KO
+  else if (!wifiLost && !isAPMode) {
     blinkLED(500);
   } 
-  else {
-    digitalWrite(LED_BUILTIN, LOW);
+  //SI WIFI KO
+  else if (wifiLost && !isAPMode) {
+    blinkLED (1000);
   }
 
-    if (!client.connected()) {
-        reconnect();
-    }
-    else 
-    {
+  if (client.connected()) {
     client.loop();  
     now = micros();
     unsigned int delayWait = 30+(100-power)*95;
@@ -419,9 +421,8 @@ void loop() {
     if (power > 0 && now - changeTime >= delayWait && now - changeTime < 10000) {
          digitalWrite(PIN_SCR,HIGH);
          unsigned int delayOn = 50; //power < 50 ? 50 : 200;
-         
          delayMicroseconds(delayOn);
     }
-    }
-    digitalWrite(PIN_SCR,LOW);
+  }
+  digitalWrite(PIN_SCR,LOW);
 }
