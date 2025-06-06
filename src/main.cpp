@@ -39,7 +39,7 @@ String mqtthostport = "";
 String mqttuser ="";
 String mqttpwd = "";
 
-const IPAddress mqtt_server(192, 168, 0, 14);
+IPAddress mqtt_server;
 u_int16_t mqtt_port;
 byte scrState = 0;
 
@@ -156,6 +156,15 @@ const char index_html[] PROGMEM = R"rawliteral(
   </script>
 </html>)rawliteral";
 
+IPAddress stringToIP(String str) {
+  int a, b, c, d;
+  if (sscanf(str.c_str(), "%d.%d.%d.%d", &a, &b, &c, &d) == 4) {
+    return IPAddress(a, b, c, d);
+  } else {
+    return IPAddress(0, 0, 0, 0); // Valeur par défaut en cas d'erreur
+  }
+}
+
 void writeStringToEEPROM(String str, int addr ) {
   EEPROM.begin(EEPROM_SIZE);
   for (int i = 0; i < str.length(); ++i) {
@@ -256,6 +265,7 @@ void readParameters() {
       mqtthostport= readStringFromEEPROM(mqtthostportIndex);
       mqttuser =  readStringFromEEPROM(mqttuserIndex);
       mqttpwd = readStringFromEEPROM(mqttpwdIndex);
+      mqtt_server = stringToIP(mqtthost);
 }
 
 void setup_wifi() {
